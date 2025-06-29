@@ -32,8 +32,8 @@ Swapper swapper = new Swapper(tokenAAddress, tokenBAddress);
 swapper.addLiquidity(
     tokenAAddress,
     tokenBAddress,
-    1000e18,  // 1000 tokens of A
-    1000e18,  // 1000 tokens of B
+    100000e18,  // 100000 tokens of A
+    100000e18,  // 100000 tokens of B
     0,        // min A
     0,        // min B
     msg.sender,
