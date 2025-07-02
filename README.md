@@ -13,7 +13,7 @@ A simplified Automated Market Maker (AMM) smart contract that replicates Uniswap
 ## 📋 Requirements
 
 - Solidity ^0.8.30
-- OpenZeppelin Contracts (IERC20, SafeMath)
+- OpenZeppelin Contracts (IERC20)
 - Any ERC-20 compatible tokens
 
 ## 🚀 Quick Start
@@ -169,7 +169,7 @@ function getAmountOut(
 - **Slippage Protection**: Minimum amount parameters
 
 ### Security Features
-- **SafeMath**: Overflow/underflow protection
+
 - **Deadline Checks**: Prevents stale transactions
 - **Input Validation**: Comprehensive parameter checking
 - **Slippage Protection**: Minimum amount requirements
