@@ -2,7 +2,6 @@
 pragma solidity ^0.8.30;
 
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
-import "@openzeppelin/contracts/utils/math/SafeMath.sol";
 
 /**
  * @title IVerifier
@@ -34,27 +33,26 @@ interface IVerifier {
  * @title Swapper
  * @dev Automated Market Maker (AMM) contract implementing Uniswap-like functionality
  * @dev Supports adding/removing liquidity, swapping tokens, and price calculations
- * @dev Uses constant product formula (x * y = k) with 0.3% fee
+ * @dev Uses constant product formula (x * y = k)
  */
 contract Swapper {
-    using SafeMath for uint256;
-
-    // Token addresses
+    /// @notice The address of token A
     IERC20 public tokenA;
+    /// @notice The address of token B
     IERC20 public tokenB;
     
-    // Pool reserves
+    /// @notice Current reserve of token A in the pool
     uint256 public reserveA;
+    /// @notice Current reserve of token B in the pool
     uint256 public reserveB;
+    /// @notice Total liquidity tokens minted
     uint256 public totalLiquidity;
 
-    // Fee (0.3%)
-    uint256 public constant FEE = 30; // 0.3% = 30 basis points
-    uint256 public constant FEE_DENOMINATOR = 10000;
-    
-    // Events
+    /// @notice Emitted when liquidity is added to the pool
     event AddLiquidity(address indexed provider, uint256 amountA, uint256 amountB, uint256 liquidity);
+    /// @notice Emitted when liquidity is removed from the pool
     event RemoveLiquidity(address indexed provider, uint256 amountA, uint256 amountB, uint256 liquidity);
+    /// @notice Emitted when a swap is performed
     event Swap(address indexed sender, uint256 amountIn, uint256 amountOut, address indexed to);
 
     /**
@@ -69,7 +67,8 @@ contract Swapper {
     }
 
     /**
-     * @dev Adds liquidity to the pool and mints liquidity tokens
+     * @notice Adds liquidity to the pool and mints liquidity tokens
+     * @dev First liquidity provider can add any amounts, subsequent providers must maintain ratio
      * @param _tokenA Address of token A (must match contract's tokenA)
      * @param _tokenB Address of token B (must match contract's tokenB)
      * @param amountADesired Desired amount of token A to add
@@ -81,8 +80,6 @@ contract Swapper {
      * @return amountA Actual amount of token A added
      * @return amountB Actual amount of token B added
      * @return liquidity Amount of liquidity tokens minted
-     * @notice First liquidity provider can add any amounts, subsequent providers must maintain ratio
-     * @notice Requires approval of both tokens before calling this function
      */
     function addLiquidity(
         address _tokenA,
@@ -105,13 +102,13 @@ contract Swapper {
             amountB = amountBDesired;
         } else {
             // Calculate based on current ratio
-            uint256 amountBOptimal = amountADesired.mul(reserveB).div(reserveA);
+            uint256 amountBOptimal = amountADesired * reserveB / reserveA;
             if (amountBOptimal <= amountBDesired) {
                 require(amountBOptimal >= amountBMin, "Insufficient B");
                 amountA = amountADesired;
                 amountB = amountBOptimal;
             } else {
-                uint256 amountAOptimal = amountBDesired.mul(reserveA).div(reserveB);
+                uint256 amountAOptimal = amountBDesired * reserveA / reserveB;
                 require(amountAOptimal <= amountADesired && amountAOptimal >= amountAMin, "Insufficient A");
                 amountA = amountAOptimal;
                 amountB = amountBDesired;
@@ -126,24 +123,25 @@ contract Swapper {
 
         // Calculate liquidity
         if (totalLiquidity == 0) {
-            liquidity = sqrt(amountA.mul(amountB));
+            liquidity = sqrt(amountA * amountB);
         } else {
             liquidity = min(
-                amountA.mul(totalLiquidity).div(reserveA),
-                amountB.mul(totalLiquidity).div(reserveB)
+                amountA * totalLiquidity / reserveA,
+                amountB * totalLiquidity / reserveB
             );
         }
 
         // Update reserves
-        reserveA = reserveA.add(amountA);
-        reserveB = reserveB.add(amountB);
-        totalLiquidity = totalLiquidity.add(liquidity);
+        reserveA = reserveA + amountA;
+        reserveB = reserveB + amountB;
+        totalLiquidity = totalLiquidity + liquidity;
 
         emit AddLiquidity(to, amountA, amountB, liquidity);
     }
 
     /**
-     * @dev Removes liquidity from the pool and returns underlying tokens
+     * @notice Removes liquidity from the pool and returns underlying tokens
+     * @dev Burns liquidity tokens and returns proportional amounts of underlying tokens
      * @param _tokenA Address of token A (must match contract's tokenA)
      * @param _tokenB Address of token B (must match contract's tokenB)
      * @param liquidity Amount of liquidity tokens to burn
@@ -153,8 +151,6 @@ contract Swapper {
      * @param deadline Unix timestamp after which the transaction will revert
      * @return amountA Amount of token A received
      * @return amountB Amount of token B received
-     * @notice Burns liquidity tokens and returns proportional amounts of underlying tokens
-     * @notice The amounts returned are proportional to the liquidity tokens burned
      */
     function removeLiquidity(
         address _tokenA,
@@ -171,15 +167,15 @@ contract Swapper {
         require(liquidity > 0, "Invalid liquidity");
 
         // Calculate amounts
-        amountA = liquidity.mul(reserveA).div(totalLiquidity);
-        amountB = liquidity.mul(reserveB).div(totalLiquidity);
+        amountA = liquidity * reserveA / totalLiquidity;
+        amountB = liquidity * reserveB / totalLiquidity;
 
         require(amountA >= amountAMin && amountB >= amountBMin, "Insufficient amounts");
 
         // Update reserves
-        reserveA = reserveA.sub(amountA);
-        reserveB = reserveB.sub(amountB);
-        totalLiquidity = totalLiquidity.sub(liquidity);
+        reserveA = reserveA - amountA;
+        reserveB = reserveB - amountB;
+        totalLiquidity = totalLiquidity - liquidity;
 
         // Transfer tokens
         require(tokenA.transfer(to, amountA), "Transfer A failed");
@@ -189,16 +185,14 @@ contract Swapper {
     }
 
     /**
-     * @dev Swaps exact input amount of tokens for output tokens
+     * @notice Swaps exact input amount of tokens for output tokens
+     * @dev Currently supports only direct swaps (A to B or B to A)
      * @param amountIn Exact amount of input tokens to swap
      * @param amountOutMin Minimum amount of output tokens to receive (slippage protection)
      * @param path Array of token addresses [inputToken, outputToken]
      * @param to Address that will receive the output tokens
      * @param deadline Unix timestamp after which the transaction will revert
      * @return amounts Array containing [inputAmount, outputAmount]
-     * @notice Currently supports only direct swaps (A to B or B to A)
-     * @notice Requires approval of input token before calling this function
-     * @notice Applies 0.3% fee to the swap
      */
     function swapExactTokensForTokens(
         uint256 amountIn,
@@ -223,34 +217,32 @@ contract Swapper {
         require(tokenB.transfer(to, amounts[1]), "Transfer out failed");
 
         // Update reserves
-        reserveA = reserveA.add(amountIn);
-        reserveB = reserveB.sub(amounts[1]);
+        reserveA = reserveA + amountIn;
+        reserveB = reserveB - amounts[1];
 
         emit Swap(msg.sender, amountIn, amounts[1], to);
     }
 
     /**
-     * @dev Gets the current price of tokenA in terms of tokenB
+     * @notice Gets the current price of tokenA in terms of tokenB
+     * @dev Price is calculated as reserveB / reserveA * 1e18
      * @param _tokenA Address of token A (must match contract's tokenA)
      * @param _tokenB Address of token B (must match contract's tokenB)
      * @return price Price of tokenA in terms of tokenB with 18 decimal precision
-     * @notice Price is calculated as reserveB / reserveA * 1e18
-     * @notice Returns 0 if reserves are insufficient
      */
     function getPrice(address _tokenA, address _tokenB) external view returns (uint256 price) {
         require(_tokenA == address(tokenA) && _tokenB == address(tokenB), "Invalid tokens");
         require(reserveB > 0, "Insufficient reserves");
-        price = reserveB.mul(1e18).div(reserveA);
+        price = reserveB * 1e18 / reserveA;
     }
 
     /**
-     * @dev Calculates the output amount for a given input using the AMM formula
+     * @notice Calculates the output amount for a given input using the AMM formula
+     * @dev Uses constant product formula: (amountIn * reserveOut) / (reserveIn + amountIn)
      * @param amountIn Amount of input tokens
      * @param reserveIn Reserve of input token
      * @param reserveOut Reserve of output token
-     * @return amountOut Expected output amount after applying 0.3% fee
-     * @notice Uses constant product formula: (amountIn * (10000 - 30) * reserveOut) / (reserveIn * 10000 + amountIn * (10000 - 30))
-     * @notice This is a pure function that doesn't modify state
+     * @return amountOut Expected output amount
      */
     function getAmountOut(
         uint256 amountIn,
@@ -260,10 +252,10 @@ contract Swapper {
         require(amountIn > 0, "Insufficient input");
         require(reserveIn > 0 && reserveOut > 0, "Insufficient liquidity");
 
-        uint256 amountInWithFee = amountIn.mul(FEE_DENOMINATOR.sub(FEE));
-        uint256 numerator = amountInWithFee.mul(reserveOut);
-        uint256 denominator = reserveIn.mul(FEE_DENOMINATOR).add(amountInWithFee);
-        amountOut = numerator.div(denominator);
+        // No fee: amountOut = (amountIn * reserveOut) / (reserveIn + amountIn)
+        uint256 numerator = amountIn * reserveOut;
+        uint256 denominator = reserveIn + amountIn;
+        amountOut = numerator / denominator;
     }
 
     /**
@@ -271,7 +263,6 @@ contract Swapper {
      * @param y Number to calculate square root of
      * @return z Integer square root of y
      * @notice Used for calculating initial liquidity tokens
-     * @notice This is an internal pure function
      */
     function sqrt(uint256 y) internal pure returns (uint256 z) {
         if (y > 3) {
@@ -291,24 +282,24 @@ contract Swapper {
      * @param a First number
      * @param b Second number
      * @return The smaller of a and b
-     * @notice This is an internal pure function
      */
     function min(uint256 a, uint256 b) internal pure returns (uint256) {
         return a < b ? a : b;
     }
 
     /**
-     * @dev Returns the current reserves of both tokens
-     * @return reserveA Current reserve of token A
-     * @return reserveB Current reserve of token B
-     * @notice This is a view function that doesn't modify state
+     * @notice Returns the current reserves of both tokens
+     * @dev This is a view function that doesn't modify state
+     * @return reserveA_ Current reserve of token A
+     * @return reserveB_ Current reserve of token B
      */
-    function getReserves() external view returns (uint256, uint256) {
+    function getReserves() external view returns (uint256 reserveA_, uint256 reserveB_) {
         return (reserveA, reserveB);
     }
 
     /**
-     * @dev Calls the verify function on an external contract
+     * @notice Calls the verify function on an external contract
+     * @dev The external contract must implement the IVerifier interface
      * @param verifierAddress Address of the external verifier contract
      * @param _tokenA Address of token A
      * @param _tokenB Address of token B
@@ -316,8 +307,6 @@ contract Swapper {
      * @param amountB_ Amount of token B for verification
      * @param amountIn_ Input amount for verification
      * @param author_ Author identifier string
-     * @notice This function allows integration with external verification systems
-     * @notice The external contract must implement the IVerifier interface
      */
     function callVerifyOnOtherContract(
         address verifierAddress,
